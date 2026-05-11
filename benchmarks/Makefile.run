@@ -1,0 +1,82 @@
+# Template for Simulation sweeps over parquet, zarr, sqlite, and text for Linux, Coremark, and Stream
+# Modify env artifacts and paths as needed to run
+
+# Parameter settings
+EXTRAARGS := -c system.duration="1s"  -c system.virtio_input.displays= -c system.fb0.displays= -c system.fb1.displays= -c system.throttle.rtf="-1" -c system.cpu.gdb_port=-1 -c system.cpu.arm0.gdb_port=-1 -c system.cpu.arm1.gdb_port=-1  -c system.cpu.arm2.gdb_port=-1  -c system.cpu.arm3.gdb_port=-1  -c system.cpu.arm4.gdb_port=-1  -c system.cpu.arm5.gdb_port=-1  -c system.cpu.arm6.gdb_port=-1  -c system.cpu.arm7.gdb_port=-1 -c system.throttle.update_interval=\"0 ms\"   -c system.throttle.method=wait -c system.cpu.arm0.data.allow_dmi="false" -c system.cpu.arm1.data.allow_dmi="false" -c system.cpu.arm2.data.allow_dmi="false" -c system.cpu.arm3.data.allow_dmi="false" -c system.cpu.arm4.data.allow_dmi="false" -c system.cpu.arm5.data.allow_dmi="false" -c system.cpu.arm6.data.allow_dmi="false" -c system.cpu.arm7.data.allow_dmi="false"
+
+#Assumptions
+# avp64-runner is installed at /mnt/grid/designs/newavp/install/bin
+# sw build is installed at /mnt/grid/designs/avp64/sw (download configuration files (.cfg) from AVP)
+
+
+runparquet:
+	export INSCIGHT=parquet; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f /mnt/grid/designs/avp64/sw/buildroot_6_5_6-x8.cfg -c system.trace=1 --trace-inscight $(EXTRAARGS)
+
+runbaseline:
+	/usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f /mnt/grid/designs/avp64/sw/buildroot_6_5_6-x8.cfg $(EXTRAARGS)
+
+runzarr:
+	export INSCIGHT=zarr; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f /mnt/grid/designs/avp64/sw/buildroot_6_5_6-x8.cfg -c system.trace=1 --trace-inscight  $(EXTRAARGS)
+
+runsqlite:
+	export INSCIGHT=sqlite; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f /mnt/grid/designs/avp64/sw/buildroot_6_5_6-x8.cfg -c system.trace=1 --trace-inscight  $(EXTRAARGS)
+
+runcsv:
+	export INSCIGHT=csv; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f /mnt/grid/designs/avp64/sw/buildroot_6_5_6-x8.cfg -c system.trace=1 --trace-inscight   $(EXTRAARGS)
+
+
+all:
+	rm -rf ../goldenoutput/linux/*
+	mkdir ../goldenoutput/linux/baseline
+	mkdir ../goldenoutput/linux/baseline/1
+	mkdir ../goldenoutput/linux/baseline/2
+	mkdir ../goldenoutput/linux/baseline/3
+	mkdir ../goldenoutput/linux/csv
+	mkdir ../goldenoutput/linux/csv/1
+	mkdir ../goldenoutput/linux/csv/2
+	mkdir ../goldenoutput/linux/csv/3
+	mkdir ../goldenoutput/linux/parquet
+	mkdir ../goldenoutput/linux/parquet/1
+	mkdir ../goldenoutput/linux/parquet/2
+	mkdir ../goldenoutput/linux/parquet/3
+	mkdir ../goldenoutput/linux/sqlite
+	mkdir ../goldenoutput/linux/sqlite/1
+	mkdir ../goldenoutput/linux/sqlite/2
+	mkdir ../goldenoutput/linux/sqlite/3
+	mkdir ../goldenoutput/linux/zarr
+	mkdir ../goldenoutput/linux/zarr/1
+	mkdir ../goldenoutput/linux/zarr/2
+	mkdir ../goldenoutput/linux/zarr/3
+	make -f Makefile.linux clean
+	make -f Makefile.linux runbaseline > ../goldenoutput/linux/baseline/1/output.txt 2>&1
+	make -f Makefile.linux runbaseline > ../goldenoutput/linux/baseline/2/output.txt 2>&1
+	make -f Makefile.linux runbaseline > ../goldenoutput/linux/baseline/3/output.txt 2>&1
+	make -f Makefile.linux runparquet > ../goldenoutput/linux/parquet/1/output.txt 2>&1
+	cp ./*.parquet ../goldenoutput/linux/parquet/1
+	make -f Makefile.linux runparquet > ../goldenoutput/linux/parquet/2/output.txt 2>&1
+	cp ./*.parquet ../goldenoutput/linux/parquet/2
+	make -f Makefile.linux runparquet > ../goldenoutput/linux/parquet/3/output.txt 2>&1
+	cp ./*.parquet ../goldenoutput/linux/parquet/3
+	make -f Makefile.linux runzarr > ../goldenoutput/linux/zarr/1/output.txt 2>&1
+	cp -r *.zr ../goldenoutput/linux/zarr/1
+	make -f Makefile.linux runzarr > ../goldenoutput/linux/zarr/2/output.txt 2>&1
+	cp -r *.zr ../goldenoutput/linux/zarr/2
+	make -f Makefile.linux runzarr > ../goldenoutput/linux/zarr/3/output.txt 2>&1
+	cp -r *.zr ../goldenoutput/linux/zarr/3
+	make -f Makefile.linux runsqlite > ../goldenoutput/linux/sqlite/1/output.txt 2>&1
+	cp -r *.db ../goldenoutput/linux/sqlite/1
+	make -f Makefile.linux runsqlite > ../goldenoutput/linux/sqlite/2/output.txt 2>&1
+	cp -r *.db ../goldenoutput/linux/sqlite/2
+	make -f Makefile.linux runsqlite > ../goldenoutput/linux/sqlite/3/output.txt 2>&1
+	cp -r *.db ../goldenoutput/linux/sqlite/3
+	make -f Makefile.linux runcsv > ../goldenoutput/linux/csv/1/output.txt 2>&1
+	cp -r *.csv ../goldenoutput/linux/csv/1
+	make -f Makefile.linux runcsv > ../goldenoutput/linux/csv/2/output.txt 2>&1
+	cp -r *.csv ../goldenoutput/linux/csv/2
+	make -f Makefile.linux runcsv > ../goldenoutput/linux/csv/3/output.txt 2>&1
+	cp -r *.csv ../goldenoutput/linux/csv/3
+
+
+clean:
+	rm -rf *.txt *.csv  sim.* data.zr *.parquet system.canbridge.tx
+

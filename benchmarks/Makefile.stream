@@ -1,0 +1,46 @@
+# Assumptions
+# avp64-runner is installed at /mnt/grid/designs/newavp/install/bin
+# SW Images are installed at /mnt/grid/designs/newavp/avp64_sw/images
+
+
+EXTRAARGS :=  -c system.virtio_input.displays= -c system.fb0.displays= -c system.fb1.displays=  -c system.throttle.method=wait -c system.throttle.rtf="-1" -c system.cpu.gdb_port=-1 -c system.cpu.arm0.gdb_port=-1  -c system.throttle.update_interval=\"0 ms\"   -c system.throttle.method=wait -c system.cpu.arm0.data.allow_dmi="false" 
+
+DESIGN := /mnt/grid/designs/newavp/avp64_sw/images/stream.cfg
+
+runparquet:
+	export INSCIGHT=parquet; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN) -c system.trace=1 --trace-inscight $(EXTRAARGS)
+
+runbaseline:
+	/usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN)  $(EXTRAARGS)
+
+runzarr:
+	export INSCIGHT=zarr; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN)  -c system.trace=1 --trace-inscight  $(EXTRAARGS)
+
+runsqlite:
+	export INSCIGHT=sqlite; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN) -c system.trace=1 --trace-inscight  $(EXTRAARGS)
+
+runcsv:
+	export INSCIGHT=csv; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN)  -c system.trace=1 --trace-inscight   $(EXTRAARGS)
+
+all:
+	rm -rf ../goldenoutput/stream/*
+	mkdir ../goldenoutput/stream/baseline
+	mkdir ../goldenoutput/stream/csv
+	mkdir ../goldenoutput/stream/parquet
+	mkdir ../goldenoutput/stream/sqlite
+	mkdir ../goldenoutput/stream/zarr
+	make -f Makefile.stream clean
+	make -f Makefile.stream runbaseline > ../goldenoutput/stream/baseline/output.txt 2>&1
+	make -f Makefile.stream runparquet > ../goldenoutput/stream/parquet/output.txt 2>&1
+	cp ./*.parquet ../goldenoutput/stream/parquet/
+	make -f Makefile.stream runzarr > ../goldenoutput/stream/zarr/output.txt 2>&1
+	cp -r *.zr ../goldenoutput/stream/zarr/
+	make -f Makefile.stream runsqlite > ../goldenoutput/stream/sqlite/output.txt 2>&1
+	cp -r *.db ../goldenoutput/stream/sqlite/
+	make -f Makefile.stream runcsv > ../goldenoutput/stream/csv/output.txt 2>&1
+	cp -r *.csv ../goldenoutput/stream/csv
+
+
+clean:
+	rm -rf *.txt *.csv  sim.* data.zr *.parquet system.canbridge.tx
+

@@ -1,0 +1,46 @@
+# Assumptions
+# avp64-runner is installed at /mnt/grid/designs/newavp/install/bin
+# SW Images are installed at /mnt/grid/designs/newavp/avp64_sw/images
+
+
+EXTRAARGS :=  -c system.virtio_input.displays= -c system.fb0.displays= -c system.fb1.displays=  -c system.throttle.method=wait -c system.throttle.rtf="-1" -c system.cpu.gdb_port=-1 -c system.cpu.arm0.gdb_port=-1  -c system.throttle.update_interval=\"0 ms\"   -c system.throttle.method=wait -c system.cpu.arm0.data.allow_dmi="false" 
+
+DESIGN := /mnt/grid/designs/newavp/avp64_sw/images/coremark.cfg
+
+runparquet:
+	export INSCIGHT=parquet; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN) -c system.trace=1 --trace-inscight $(EXTRAARGS)
+
+runbaseline:
+	/usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN)  $(EXTRAARGS)
+
+runzarr:
+	export INSCIGHT=zarr; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN)  -c system.trace=1 --trace-inscight  $(EXTRAARGS)
+
+runsqlite:
+	export INSCIGHT=sqlite; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN) -c system.trace=1 --trace-inscight  $(EXTRAARGS)
+
+runcsv:
+	export INSCIGHT=csv; /usr/bin/time -p /mnt/grid/designs/newavp/install/bin/avp64-runner -f $(DESIGN)  -c system.trace=1 --trace-inscight   $(EXTRAARGS)
+
+all:
+	rm -rf ../goldenoutput/coremark/*
+	mkdir ../goldenoutput/coremark/baseline
+	mkdir ../goldenoutput/coremark/csv
+	mkdir ../goldenoutput/coremark/parquet
+	mkdir ../goldenoutput/coremark/sqlite
+	mkdir ../goldenoutput/coremark/zarr
+	make -f Makefile.coremark clean
+	make -f Makefile.coremark runbaseline > ../goldenoutput/coremark/baseline/output.txt 2>&1
+	make -f Makefile.coremark runparquet > ../goldenoutput/coremark/parquet/output.txt 2>&1
+	cp ./*.parquet ../goldenoutput/coremark/parquet/
+	make -f Makefile.coremark runzarr > ../goldenoutput/coremark/zarr/output.txt 2>&1
+	cp -r *.zr ../goldenoutput/coremark/zarr/
+	make -f Makefile.coremark runsqlite > ../goldenoutput/coremark/sqlite/output.txt 2>&1
+	cp -r *.db ../goldenoutput/coremark/sqlite/
+	make -f Makefile.coremark runcsv > ../goldenoutput/coremark/csv/output.txt 2>&1
+	cp -r *.csv ../goldenoutput/coremark/csv
+
+clean:
+	rm -rf *.txt *.csv  sim.* data.zr *.parquet system.canbridge.tx
+
+
