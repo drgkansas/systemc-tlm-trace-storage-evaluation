@@ -1,0 +1,439 @@
+
+=== ZARR TRANSACTION STORAGE SCHEMA ===
+
+The Zarr backend stores SystemC transaction data in a columnar format, matching the SQLite schema.
+Each transaction field is stored as a separate Zarr array for efficient access and compression.
+
+ZARR STORAGE STRUCTURE:
+data.zr/                         # Zarr group (directory)
+  ├── id/                        # uint64 array [10000]
+  ├── st/                        # uint64 array [10000]
+  ├── dir/                       # int32 array [10000]
+  ├── port/                      # uint64 array [10000]
+  ├── proto/                     # int32 array [10000]
+  └── json/                      # uint8 array [10000, 512]
+
+FIELD DESCRIPTIONS:
+
+1. id (uint64)
+   - Auto-incrementing transaction ID (0, 1, 2, 3, ...)
+   - Unique identifier for each transaction
+   - Example: id: 187
+
+2. st (uint64)
+   - Simulation timestamp when transaction occurred
+   - SystemC time in internal time units
+   - Example: st: 12000 (transaction at time 12000)
+
+3. dir (int32)
+   - Transaction direction:
+     * 0 = FW (Forward) - initiator → target
+     * 1 = BW (Backward) - target → initiator response
+   - Example: dir: 0 (FW) or dir: 1 (BW)
+
+4. port (uint64)
+   - Memory address of the port/socket object that saw this transaction
+   - Used to identify which component in the system generated the transaction
+   - Example: port: 281474928581776
+
+5. proto (int32)
+   - Protocol kind/type:
+     * 0 = TLM (Transaction Level Modeling - memory reads/writes)
+     * 1 = GPIO (General Purpose I/O - state changes)
+     * 2 = CLK (Clock - frequency changes)
+     * etc.
+   - Example: proto: 0 (TLM transaction)
+
+6. json (uint8 array [512])
+   - Full transaction payload as JSON string
+   - Stored as byte array (uint8) with null termination
+   - Maximum 512 bytes per transaction
+   - Contains protocol-specific fields:
+
+   TLM transactions (proto=0):
+   {
+     "address": 0,                    # Memory address
+     "data": [3,0,0,0],              # Data bytes
+     "command": "READ",               # READ or WRITE
+     "byte_enable": [],              # Byte enables
+     "streaming_width": "4",         # Transfer width
+     "dmi_allowed": false,           # Direct Memory Interface flag
+     "response_status": "TLM_OK_RESPONSE",
+     "sbi": {                        # System Bus Info
+       "is_debug": false,
+       "is_insn": false,             # Instruction fetch?
+       "is_secure": true,
+       "cpuid": 6,                   # CPU ID
+       "privilege": 0,               # Privilege level
+       "asid": 18446744073709551615  # Address Space ID
+     }
+   }
+
+   GPIO transactions (proto=1):
+   {
+     "state": true                   # GPIO pin state (true/false)
+   }
+
+   CLK transactions (proto=2):
+   {
+     "newhz": 1000000000,            # New frequency in Hz
+     "oldhz": 0                      # Previous frequency in Hz
+   }
+
+EXAMPLE TRANSACTION PATTERNS:
+
+TLM Read Transaction (memory access):
+  --- Transaction 187 ---
+  id:    187                        # 187th transaction
+  st:    12000                      # At simulation time 12000
+  dir:   0 (FW)                     # Forward (read request)
+  port:  281474928581776           # From this port
+  proto: 0                          # TLM protocol
+  json:  {"address":0,"data":[0,0,0,0],"command":"READ",...}
+
+  --- Transaction 188 ---
+  id:    188                        # 188th transaction
+  st:    12000                      # Same time (immediate response)
+  dir:   1 (BW)                     # Backward (read response)
+  port:  281474928581776           # Same port
+  proto: 0                          # TLM protocol
+  json:  {"address":0,"data":[3,0,0,0],"command":"READ",...}
+
+  NOTE: Transactions 187 and 188 form a request/response pair
+
+GPIO State Change:
+  --- Transaction 3 ---
+  id:    3
+  st:    0                          # At initialization
+  dir:   0 (FW)                     # Forward only (no response)
+  port:  281474928291144
+  proto: 1                          # GPIO protocol
+  json:  {"state":true}             # Pin went HIGH
+
+Clock Frequency Change:
+  --- Transaction 0 ---
+  id:    0
+  st:    0                          # At initialization
+  dir:   0 (FW)                     # Forward only
+  port:  281474928287128
+  proto: 2                          # Clock protocol
+  json:  {"newhz":1000000000,"oldhz":0}  # Set to 1 GHz
+
+HOW ZARR STORES THE DATA:
+
+Zarr uses a columnar storage format where each field is a separate array:
+- Efficient for queries on specific fields (e.g., "get all timestamps")
+- Supports chunking (data divided into 1000-entry chunks)
+- Supports compression (can compress chunks independently)
+- Arrays can be resized (currently 10000 entries, expandable)
+
+Data Layout in Memory:
+  id:   [0, 1, 2, 3, 4, ..., 187, 188, ...]
+  st:   [0, 0, 0, 0, 0, ..., 12000, 12000, ...]
+  dir:  [0, 0, 0, 0, 0, ..., 0, 1, ...]
+  port: [281474928287128, 281474928288472, ..., 281474928581776, 281474928581776, ...]
+  proto:[2, 2, 2, 1, 1, ..., 0, 0, ...]
+  json: [["{"newhz":..."], ["{"newhz":..."], ..., ["{"address":..."], ["{"address":..."]]
+
+INTERACTING WITH ZARR DATA:
+
+Using read_zarr.py (interactive):
+  python python/read_zarr.py data.zr
+
+  Commands:
+  - "id", "st", "port" : View scalar uint64 fields
+  - "dir", "proto"     : View scalar int32 fields
+  - "json"             : View JSON strings (decoded from bytes)
+  - "view"             : View complete transactions (all fields together)
+
+Using Python directly:
+  import zarr
+  store = zarr.open_group('data.zr', mode='r')
+
+  # Access individual fields
+  ids = store['id'][:]           # All IDs
+  timestamps = store['st'][:]    # All timestamps
+
+  # Access a specific transaction
+  txn_id = store['id'][187]      # Get ID of transaction 187
+  txn_time = store['st'][187]    # Get timestamp of transaction 187
+
+  # Decode JSON for a transaction
+  json_bytes = store['json'][187, :]
+  json_str = bytes(json_bytes).decode('utf-8').rstrip('\x00')
+
+COMPARING ZARR vs SQLITE:
+
+Both backends store the same schema with identical fields:
+- SQLite: Rows in a single table with columns [id, st, dir, port, proto, json]
+- Zarr: Separate arrays for each column, same data layout
+
+Query examples:
+  SQLite:  SELECT * FROM transactions WHERE id = 187;
+  Zarr:    store['id'][187], store['st'][187], store['dir'][187], ...
+
+  SQLite:  SELECT COUNT(*) FROM transactions WHERE proto = 0;
+  Zarr:    np.count_nonzero(store['proto'][:] == 0)
+
+=== MODIFYING FOR LONGER SIMULATIONS / LARGER DATASETS ===
+
+The Zarr backend is currently configured for 10,000 transactions. To handle longer
+simulations or larger datasets, you need to modify the array sizes and performance settings.
+
+CURRENT LIMITATIONS:
+- Maximum transactions: 10,000 (hardcoded in database_zarr.cpp)
+- Maximum JSON size: 512 bytes per transaction
+- Chunk size: 1,000 entries per chunk
+- When limit is reached: Warning printed, new transactions dropped
+
+FILES TO MODIFY:
+
+1. database_zarr.cpp (lines 77-80)
+
+   Current code:
+   ```cpp
+   std::vector<size_t> shape = {10000};        // Start with 10k entries
+   std::vector<size_t> chunks = {1000};
+   std::vector<size_t> jsonShape = {10000, 512};  // 512-byte strings for JSON
+   std::vector<size_t> jsonChunks = {1000, 512};
+   ```
+
+   Modifications for larger datasets:
+
+   a) Increase maximum transaction count:
+      ```cpp
+      std::vector<size_t> shape = {1000000};      // 1 million transactions
+      std::vector<size_t> jsonShape = {1000000, 512};
+      ```
+
+   b) Adjust chunk size for performance:
+      ```cpp
+      std::vector<size_t> chunks = {10000};       // Larger chunks = fewer I/O ops
+      std::vector<size_t> jsonChunks = {10000, 512};
+      ```
+
+      Rule of thumb:
+      - Small chunks (100-1000): Better for random access, more overhead
+      - Medium chunks (1000-10000): Balanced performance
+      - Large chunks (10000-100000): Better for sequential writes, uses more memory
+
+   c) Increase JSON field size (if transactions have large payloads):
+      ```cpp
+      std::vector<size_t> jsonShape = {1000000, 2048};  // 2KB JSON strings
+      std::vector<size_t> jsonChunks = {10000, 2048};
+      ```
+
+2. database_zarr.cpp (line 155)
+
+   Current code:
+   ```cpp
+   if (entryCount >= 10000) {
+       std::cerr << "[database_zarr] Warning: Dataset full, cannot store more entries" << std::endl;
+       return;
+   }
+   ```
+
+   Modification:
+   ```cpp
+   if (entryCount >= 1000000) {  // Match the shape size from init()
+       std::cerr << "[database_zarr] Warning: Dataset full, cannot store more entries" << std::endl;
+       return;
+   }
+   ```
+
+MEMORY CONSIDERATIONS:
+
+Uncompressed memory usage estimates:
+
+  10,000 transactions:
+  - id, st, port: 3 × 10,000 × 8 bytes = 240 KB
+  - dir, proto: 2 × 10,000 × 4 bytes = 80 KB
+  - json: 10,000 × 512 bytes = 5.12 MB
+  - Total: ~5.4 MB
+
+  1,000,000 transactions:
+  - id, st, port: 3 × 1,000,000 × 8 bytes = 24 MB
+  - dir, proto: 2 × 1,000,000 × 4 bytes = 8 MB
+  - json: 1,000,000 × 512 bytes = 512 MB
+  - Total: ~544 MB
+
+  With compression (typical 2-5x reduction):
+  - 1M transactions: ~100-270 MB on disk
+
+PERFORMANCE TUNING:
+
+1. Chunk size recommendations:
+   - For write-heavy workloads: chunks = {10000} or larger
+   - For read-heavy workloads: chunks = {1000} or smaller
+   - For mixed workloads: chunks = {5000}
+
+2. Compression (future enhancement):
+   Currently not enabled. To add compression, modify dataset creation:
+   ```cpp
+   // In database_zarr.cpp, after creating datasets
+   nlohmann::json compression;
+   compression["id"] = "blosc";
+   compression["level"] = 5;
+   z5::writeAttributes(f, "id", compression);
+   ```
+   Compression codecs: blosc (fast, good ratio), gzip (slower, better ratio), lz4 (fastest)
+
+3. Monitoring dataset usage:
+   Check how many transactions were stored:
+   ```python
+   import zarr
+   store = zarr.open_group('data.zr', mode='r')
+   import numpy as np
+
+   # Find first unused entry (id = 0 after used entries)
+   ids = store['id'][:]
+   used_entries = np.count_nonzero(ids) or len(ids)
+   print(f"Used entries: {used_entries} / {len(ids)}")
+   ```
+
+WORKFLOW FOR LONGER SIMULATIONS:
+
+1. Estimate transaction count:
+
+   a) Run a short test simulation:
+      ```bash
+      export INSCIGHT=zarr
+      doit  # Default runs 100us simulation
+      ```
+
+   b) Count transactions from test run:
+      ```bash
+      conda activate z5-dev
+      python python/read_zarr.py data.zr
+      # Note the highest transaction ID
+      ```
+
+   c) Extrapolate for longer duration:
+      transactions_needed = (transactions_per_100us / 100) × target_duration_us
+
+      Example: If 100us generated 5000 transactions, and you want 10ms:
+      transactions_needed = (5000 / 100) × 10000 = 500,000 transactions
+
+2. Modify database_zarr.cpp with appropriate sizes:
+
+   - Change shape = {10000} to shape = {500000}
+   - Change jsonShape = {10000, 512} to jsonShape = {500000, 512}
+   - Change the capacity check from 10000 to 500000
+   - Optionally adjust chunk sizes for better performance
+
+3. Rebuild the binary (do this NOT in a conda env):
+   ```bash
+   make -f ~/Dev/scripts/makebuild
+   ```
+
+   This will:
+   - Run cmake in /home/dusti/Dev/avp64/build
+   - Build with make -j12
+   - Install to /opt/avp64
+
+4. Delete old data.zr (incompatible with new shape):
+   ```bash
+   rm -rf data.zr
+   ```
+
+5. Adjust simulation duration and run:
+
+   The simulation duration is controlled in ~/Dev/scripts/doit:
+   ```bash
+   -c system.duration="100us"   # Current default
+   ```
+
+   To run longer simulations, modify doit script:
+   ```bash
+   -c system.duration="10ms"    # 10 milliseconds
+   -c system.duration="1s"      # 1 second
+   ```
+
+   Then run:
+   ```bash
+   export INSCIGHT=zarr
+   doit
+   ```
+
+6. Verify data wasn't truncated:
+   ```bash
+   conda activate z5-dev
+   python python/read_zarr.py data.zr
+   # Check highest transaction ID is less than your array size
+   # If you see "[database_zarr] Warning: Dataset full" in simulation output,
+   # increase array size and rebuild
+   ```
+
+7. Monitor in real-time (optional):
+   ```bash
+   # In one terminal, run simulation
+   doit
+
+   # In another terminal, watch transaction count grow
+   watch -n 1 'ls -lh data.zr/*/0.0 2>/dev/null | head'
+   ```
+
+SIMULATION CONFIGURATION (~/Dev/scripts/doit):
+
+The doit script runs the avp64-runner with several key parameters that affect data collection:
+
+```bash
+/opt/avp64/bin/avp64-runner \
+  -f /opt/avp64/sw/buildroot_6_5_6-x8.cfg \    # System configuration
+  --trace-inscight \                            # Enable inscight tracing
+  -c system.trace=1 \                           # Enable transaction tracing
+  -c system.duration="100us" \                  # Simulation duration
+  -c system.cpu.arm0.allow_dmi="false" \        # Force all transactions through TLM
+  ...                                           # (repeated for all 8 CPUs)
+```
+
+Key parameters:
+
+1. --trace-inscight
+   - Enables inscight database backend (uses $INSCIGHT env variable)
+   - Without this, no transactions are recorded
+
+2. system.trace=1
+   - Enables transaction tracing at the system level
+   - Captures TLM, GPIO, and CLK transactions
+
+3. system.duration="100us"
+   - Controls how long the simulation runs
+   - Formats: "100us" (microseconds), "10ms" (milliseconds), "1s" (seconds)
+   - Longer duration = more transactions = need larger Zarr arrays
+
+4. allow_dmi="false"
+   - Forces all memory accesses to go through TLM transactions
+   - DMI (Direct Memory Interface) bypasses TLM and won't be traced
+   - Setting to "false" ensures all memory operations are captured
+   - Trade-off: Slower simulation but complete transaction capture
+
+Transaction rate factors:
+- Number of active CPUs (currently 8)
+- Workload being executed (buildroot_6_5_6-x8.cfg)
+- DMI enabled/disabled (DMI bypasses tracing)
+- System activity level
+
+Typical transaction rates (with DMI disabled):
+- Idle system: ~100-1000 transactions per 100us
+- Light activity: ~1000-10000 transactions per 100us
+- Heavy activity: 10000-100000+ transactions per 100us
+
+DYNAMIC RESIZING (FUTURE ENHANCEMENT):
+
+Currently arrays are fixed-size. To implement dynamic resizing:
+- Use z5::Dataset::resize() method
+- Check entryCount against current shape
+- Resize when 90% full
+- Requires additional error handling
+
+Example pseudocode:
+```cpp
+if (entryCount >= idDs->shape(0) * 0.9) {
+    size_t newSize = idDs->shape(0) * 2;  // Double the size
+    idDs->resize({newSize});
+    stDs->resize({newSize});
+    // ... resize all datasets
+    std::cout << "[database_zarr] Resized arrays to " << newSize << std::endl;
+}
+```

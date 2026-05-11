@@ -27,6 +27,11 @@
 
 namespace inscight {
 
+extern std::atomic<std::uint64_t> unique_transaction_id;
+extern std::atomic<std::uint64_t> unique_fw_transaction_id;
+extern std::atomic<std::uint64_t> unique_bw_transaction_id;
+extern std::chrono::steady_clock::time_point start_time;
+
 static std::string escape(const std::string& s) {
     std::stringstream ss;
     for (auto c : s) {
@@ -123,11 +128,40 @@ void database_csv::cpu_call_stack(id_t obj, sysc_time_t st, size_t level, unsign
 }
 
 void database_csv::transaction_trace_fw(id_t obj, sysc_time_t st, protocol_kind proto, const char* json) {
+    unsigned long long txn_id = unique_transaction_id.fetch_add(1, std::memory_order_relaxed);
+    unique_fw_transaction_id.fetch_add(1, std::memory_order_relaxed);
+
+    
+
+
     m_db_transactions << st << "," << obj << ",fw," << protocol_str(proto) << ","  << json << std::endl;
+
+        // Instrument for SystemC paper metrics
+        if (txn_id % DB_INSTRUMENT_SIZE == 0){
+            auto now = std::chrono::steady_clock::now();
+            auto ms =  std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+            std::cerr << "TX_CHECKOUT " << txn_id << " transactions " <<  ms << " ms" << std::endl  << std::flush;
+        }
+
 }
 
 void database_csv::transaction_trace_bw(id_t obj, sysc_time_t st, protocol_kind proto, const char* json) {
-    m_db_transactions << st << "," << obj << ",bw," << protocol_str(proto) << ",\""  << json << "\"" << std::endl;
+
+       unsigned long long txn_id = unique_transaction_id.fetch_add(1, std::memory_order_relaxed);
+    unique_bw_transaction_id.fetch_add(1, std::memory_order_relaxed);
+ 
+
+	m_db_transactions << st << "," << obj << ",bw," << protocol_str(proto) << ",\""  << json << "\"" << std::endl;
+
+        // Instrument for SystemC paper metrics
+        if (txn_id % DB_INSTRUMENT_SIZE == 0){
+            auto now = std::chrono::steady_clock::now();
+            auto ms =  std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+            std::cerr << "TX_CHECKOUT " << txn_id << " transactions " <<  ms << " ms" << std::endl  << std::flush;
+        }
+
+
+
 }
 
 void database_csv::log_message(sysc_time_t st, int loglevel, const char* sender, const char* message) {
@@ -176,7 +210,15 @@ database_csv::database_csv(const std::string& options):
 }
 
 database_csv::~database_csv() {
-    stop();
+    unsigned long long txn_id = unique_transaction_id.fetch_add(1, std::memory_order_relaxed);
+    unique_fw_transaction_id.fetch_add(1, std::memory_order_relaxed);
+    std::cerr << "TX_CHECKOUT Number of fw transactions " << unique_fw_transaction_id.fetch_add(1, std::memory_order_relaxed) - 1 << std::endl  << std::flush;
+    std::cerr << "TX_CHECKOUT Number of bw transactions " << unique_bw_transaction_id.fetch_add(1, std::memory_order_relaxed) - 1 << std::endl  << std::flush;
+    std::cerr << "TX_CHECKOUT Number of transactions " << unique_transaction_id.fetch_add(1, std::memory_order_relaxed) - 1 << std::endl  << std::flush;
+
+    
+
+	stop();
 }
 
 } // namespace inscight

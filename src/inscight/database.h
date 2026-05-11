@@ -35,6 +35,8 @@ protected:
     std::atomic<bool> m_enabled;
     std::atomic<bool> m_running;
 
+    static constexpr std::size_t DB_INSTRUMENT_SIZE = 1000000;
+
     std::mutex m_mtx;
     std::condition_variable_any m_cv;
     std::vector<entry> m_entries;
