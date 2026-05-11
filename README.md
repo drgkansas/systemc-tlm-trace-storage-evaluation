@@ -94,3 +94,6 @@ _Accellera, Accellera Systems Initiative and SystemC are trademarks of
 [5]: https://accellera.org/about/join/
 [6]: https://twitter.com/accellera
 [logo]: https://www.accellera.org/images/about/policies/logos/logo_systemc.gif
+
+Benchmarks subdirectory shows how to run the modified avp64 with Linux, coremark, and stream workloads
+This repo includes code to write TLM Transaction data to Apache Parquet and Zarr
